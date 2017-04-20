@@ -16,7 +16,7 @@ public class LogDebug {
         Log.d(TAG, message);
     }
 
-    public void makeToast (Context context, String toastMessage) {
+    public static void makeToast (Context context, String toastMessage) {
         Toast.makeText(context,toastMessage,Toast.LENGTH_LONG).show();
     }
 
