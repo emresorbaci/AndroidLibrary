@@ -14,21 +14,21 @@ public class MyTextView extends TextView {
 
     public MyTextView(Context context) {
         super(context);
-        Typeface face = Typeface.createFromAsset(context.getAssets(), "Helvetica_Neue.ttf");
+        Typeface face = Typeface.createFromAsset(context.getAssets(), "murray.ttf");
         this.setTypeface(face);
         this.setTextColor(10841354);
     }
 
     public MyTextView(Context context, AttributeSet attrs) {
         super(context, attrs);
-        Typeface face = Typeface.createFromAsset(context.getAssets(), "Helvetica_Neue.ttf");
+        Typeface face = Typeface.createFromAsset(context.getAssets(), "murray.ttf");
         this.setTypeface(face);
         this.setTextColor(10841354);
     }
 
     public MyTextView(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
-        Typeface face = Typeface.createFromAsset(context.getAssets(), "Helvetica_Neue.ttf");
+        Typeface face = Typeface.createFromAsset(context.getAssets(), "murray.ttf");
         this.setTypeface(face);
         this.setTextColor(10841354);
     }
