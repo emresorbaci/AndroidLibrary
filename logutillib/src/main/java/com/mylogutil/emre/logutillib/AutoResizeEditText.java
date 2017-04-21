@@ -5,12 +5,14 @@ import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.os.Build;
 import android.support.v7.widget.AppCompatEditText;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
-import android.text.method.TransformationMethod;
 import android.util.AttributeSet;
+import android.util.Log;
+import android.util.SparseIntArray;
 import android.util.TypedValue;
 
 /**
@@ -20,220 +22,264 @@ import android.util.TypedValue;
 public class AutoResizeEditText extends AppCompatEditText {
 
     private static final int NO_LINE_LIMIT = -1;
-    private final RectF _availableSpaceRect;
-    private final AutoResizeEditText.SizeTester _sizeTester;
+    private final RectF _availableSpaceRect = new RectF();
+    private final SparseIntArray _textCachedSizes = new SparseIntArray();
+    private final SizeTester _sizeTester;
     private float _maxTextSize;
-    private float _spacingMult;
-    private float _spacingAdd;
+    private float _spacingMult = 1.0f;
+    private float _spacingAdd = 0.0f;
     private float _minTextSize;
     private int _widthLimit;
     private int _maxLines;
-    private boolean _initialized;
-    private TextPaint _paint;
+    private boolean _enableSizeCache = true;
+    private boolean _initiallized = false;
+    private TextPaint paint;
 
-    public AutoResizeEditText(Context context) {
-        this(context, (AttributeSet)null, 16842884);
+    private interface SizeTester {
+        /**
+         * AutoResizeEditText
+         *
+         * @param suggestedSize
+         *            Size of text to be tested
+         * @param availableSpace
+         *            available space in which text must fit
+         * @return an integer < 0 if after applying {@code suggestedSize} to
+         *         text, it takes less space than {@code availableSpace}, > 0
+         *         otherwise
+         */
+        public int onTestSize(int suggestedSize, RectF availableSpace);
     }
 
-    public AutoResizeEditText(Context context, AttributeSet attrs) {
-        this(context, attrs, 16842884);
+    public AutoResizeEditText(final Context context) {
+        this(context, null, 0);
     }
 
-    public AutoResizeEditText(Context context, AttributeSet attrs, int defStyle) {
+    public AutoResizeEditText(final Context context, final AttributeSet attrs) {
+        this(context, attrs, 0);
+    }
+
+    public AutoResizeEditText(final Context context, final AttributeSet attrs,
+                              final int defStyle) {
         super(context, attrs, defStyle);
-        this._availableSpaceRect = new RectF();
-        this._spacingMult = 1.0F;
-        this._spacingAdd = 0.0F;
-        this._initialized = false;
-        this._minTextSize = TypedValue.applyDimension(2, 12.0F, this.getResources().getDisplayMetrics());
-        this._maxTextSize = this.getTextSize();
-        this._paint = new TextPaint(this.getPaint());
-        if(this._maxLines == 0) {
-            this._maxLines = -1;
-        }
-
-        this._sizeTester = new AutoResizeEditText.SizeTester() {
+        // using the minimal recommended font size
+        _minTextSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
+                12, getResources().getDisplayMetrics());
+        _maxTextSize = getTextSize();
+        if (_maxLines == 0)
+            // no value was assigned during construction
+            _maxLines = NO_LINE_LIMIT;
+        // prepare size tester:
+        _sizeTester = new SizeTester() {
             final RectF textRect = new RectF();
 
-            @TargetApi(16)
-            public int onTestSize(int suggestedSize, RectF availableSpace) {
-                AutoResizeEditText.this._paint.setTextSize((float)suggestedSize);
-                TransformationMethod transformationMethod = AutoResizeEditText.this.getTransformationMethod();
-                String text;
-                if(transformationMethod != null) {
-                    text = transformationMethod.getTransformation(AutoResizeEditText.this.getText(), AutoResizeEditText.this).toString();
+            @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
+            @Override
+            public int onTestSize(final int suggestedSize,
+                                  final RectF availableSPace) {
+                paint.setTextSize(suggestedSize);
+                final String text = getText().toString();
+                final boolean singleline = getMaxLines() == 1;
+                if (singleline) {
+                    textRect.bottom = paint.getFontSpacing();
+                    textRect.right = paint.measureText(text);
                 } else {
-                    text = AutoResizeEditText.this.getText().toString();
-                }
-
-                boolean singleLine = AutoResizeEditText.this.getMaxLines() == 1;
-                if(singleLine) {
-                    this.textRect.bottom = AutoResizeEditText.this._paint.getFontSpacing();
-                    this.textRect.right = AutoResizeEditText.this._paint.measureText(text);
-                } else {
-                    StaticLayout layout = new StaticLayout(text, AutoResizeEditText.this._paint, AutoResizeEditText.this._widthLimit, Layout.Alignment.ALIGN_NORMAL, AutoResizeEditText.this._spacingMult, AutoResizeEditText.this._spacingAdd, true);
-                    if(AutoResizeEditText.this.getMaxLines() != -1 && layout.getLineCount() > AutoResizeEditText.this.getMaxLines()) {
+                    final StaticLayout layout = new StaticLayout(text, paint,
+                            _widthLimit, Layout.Alignment.ALIGN_NORMAL, _spacingMult,
+                            _spacingAdd, true);
+                    // return early if we have more lines
+                    Log.d("NLN", "Current Lines = "+Integer.toString(layout.getLineCount()));
+                    Log.d("NLN", "Max Lines = "+Integer.toString(getMaxLines()));
+                    if (getMaxLines() != NO_LINE_LIMIT
+                            && layout.getLineCount() > getMaxLines())
                         return 1;
-                    }
-
-                    this.textRect.bottom = (float)layout.getHeight();
+                    textRect.bottom = layout.getHeight();
                     int maxWidth = -1;
-                    int lineCount = layout.getLineCount();
-
-                    for(int i = 0; i < lineCount; ++i) {
-                        int end = layout.getLineEnd(i);
-                        if(i < lineCount - 1 && end > 0 && !AutoResizeEditText.this.isValidWordWrap(text.charAt(end - 1), text.charAt(end))) {
-                            return 1;
-                        }
-
-                        if((float)maxWidth < layout.getLineRight(i) - layout.getLineLeft(i)) {
-                            maxWidth = (int)layout.getLineRight(i) - (int)layout.getLineLeft(i);
-                        }
-                    }
-
-                    this.textRect.right = (float)maxWidth;
+                    for (int i = 0; i < layout.getLineCount(); i++)
+                        if (maxWidth < layout.getLineWidth(i))
+                            maxWidth = (int) layout.getLineWidth(i);
+                    textRect.right = maxWidth;
                 }
-
-                this.textRect.offsetTo(0.0F, 0.0F);
-                return availableSpace.contains(this.textRect)?-1:1;
+                textRect.offsetTo(0, 0);
+                if (availableSPace.contains(textRect))
+                    // may be too small, don't worry we will find the best match
+                    return -1;
+                // else, too big
+                return 1;
             }
         };
-        this._initialized = true;
+        _initiallized = true;
     }
 
-    public boolean isValidWordWrap(char before, char after) {
-        return before == 32 || before == 45;
-    }
-
-    public void setAllCaps(boolean allCaps) {
-        super.setAllCaps(allCaps);
-        this.adjustTextSize();
-    }
-
-    public void setTypeface(Typeface tf) {
+    @Override
+    public void setTypeface(final Typeface tf) {
+        if (paint == null)
+            paint = new TextPaint(getPaint());
+        paint.setTypeface(tf);
         super.setTypeface(tf);
-        this.adjustTextSize();
     }
 
-    public void setTextSize(float size) {
-        this._maxTextSize = size;
-        this.adjustTextSize();
+    @Override
+    public void setTextSize(final float size) {
+        _maxTextSize = size;
+        _textCachedSizes.clear();
+        adjustTextSize();
     }
 
-    public void setMaxLines(int maxLines) {
-        super.setMaxLines(maxLines);
-        this._maxLines = maxLines;
-        this.adjustTextSize();
+    @Override
+    public void setMaxLines(final int maxlines) {
+        super.setMaxLines(maxlines);
+        _maxLines = maxlines;
+        reAdjust();
     }
 
+    @Override
     public int getMaxLines() {
-        return this._maxLines;
+        return _maxLines;
     }
 
+    @Override
     public void setSingleLine() {
         super.setSingleLine();
-        this._maxLines = 1;
-        this.adjustTextSize();
+        _maxLines = 1;
+        reAdjust();
     }
 
-    public void setSingleLine(boolean singleLine) {
+    @Override
+    public void setSingleLine(final boolean singleLine) {
         super.setSingleLine(singleLine);
-        if(singleLine) {
-            this._maxLines = 1;
-        } else {
-            this._maxLines = -1;
-        }
-
-        this.adjustTextSize();
+        if (singleLine)
+            _maxLines = 1;
+        else
+            _maxLines = NO_LINE_LIMIT;
+        reAdjust();
     }
 
-    public void setLines(int lines) {
+    @Override
+    public void setLines(final int lines) {
         super.setLines(lines);
-        this._maxLines = lines;
-        this.adjustTextSize();
+        _maxLines = lines;
+        reAdjust();
     }
 
-    public void setTextSize(int unit, float size) {
-        Context c = this.getContext();
+    @Override
+    public void setTextSize(final int unit, final float size) {
+        final Context c = getContext();
         Resources r;
-        if(c == null) {
+        if (c == null)
             r = Resources.getSystem();
-        } else {
+        else
             r = c.getResources();
-        }
-
-        this._maxTextSize = TypedValue.applyDimension(unit, size, r.getDisplayMetrics());
-        this.adjustTextSize();
+        _maxTextSize = TypedValue.applyDimension(unit, size,
+                r.getDisplayMetrics());
+        _textCachedSizes.clear();
+        adjustTextSize();
     }
 
-    public void setLineSpacing(float add, float mult) {
+    @Override
+    public void setLineSpacing(final float add, final float mult) {
         super.setLineSpacing(add, mult);
-        this._spacingMult = mult;
-        this._spacingAdd = add;
+        _spacingMult = mult;
+        _spacingAdd = add;
     }
 
-    public void setMinTextSize(float minTextSize) {
-        this._minTextSize = minTextSize;
-        this.adjustTextSize();
+    /**
+     * Set the lower text size limit and invalidate the view
+     *
+     * @param
+
+     */
+    public void setMinTextSize(final float minTextSize) {
+        _minTextSize = minTextSize;
+        reAdjust();
+    }
+
+    private void reAdjust() {
+        adjustTextSize();
     }
 
     private void adjustTextSize() {
-        if(this._initialized) {
-            int startSize = (int)this._minTextSize;
-            int heightLimit = this.getMeasuredHeight() - this.getCompoundPaddingBottom() - this.getCompoundPaddingTop();
-            this._widthLimit = this.getMeasuredWidth() - this.getCompoundPaddingLeft() - this.getCompoundPaddingRight();
-            if(this._widthLimit > 0) {
-                this._paint = new TextPaint(this.getPaint());
-                this._availableSpaceRect.right = (float)this._widthLimit;
-                this._availableSpaceRect.bottom = (float)heightLimit;
-                this.superSetTextSize(startSize);
-            }
-        }
+        if (!_initiallized)
+            return;
+        final int startSize = (int) _minTextSize;
+        final int heightLimit = getMeasuredHeight()
+                - getCompoundPaddingBottom() - getCompoundPaddingTop();
+        _widthLimit = getMeasuredWidth() - getCompoundPaddingLeft()
+                - getCompoundPaddingRight();
+        if (_widthLimit <= 0)
+            return;
+        _availableSpaceRect.right = _widthLimit;
+        _availableSpaceRect.bottom = heightLimit;
+        super.setTextSize(
+                TypedValue.COMPLEX_UNIT_PX,
+                efficientTextSizeSearch(startSize, (int) _maxTextSize,
+                        _sizeTester, _availableSpaceRect));
     }
 
-    private void superSetTextSize(int startSize) {
-        int textSize = this.binarySearch(startSize, (int)this._maxTextSize, this._sizeTester, this._availableSpaceRect);
-        super.setTextSize(0, (float)textSize);
+    /**
+     * Enables or disables size caching, enabling it will improve performance
+     * where you are animating a value inside TextView. This stores the font
+     * size against getText().length() Be careful though while enabling it as 0
+     * takes more space than 1 on some fonts and so on.
+     *
+     * @param enable
+     *            enable font size caching
+     */
+    public void setEnableSizeCache(final boolean enable) {
+        _enableSizeCache = enable;
+        _textCachedSizes.clear();
+        adjustTextSize();
     }
 
-    private int binarySearch(int start, int end, AutoResizeEditText.SizeTester sizeTester, RectF availableSpace) {
+    private int efficientTextSizeSearch(final int start, final int end,
+                                        final SizeTester sizeTester, final RectF availableSpace) {
+        if (!_enableSizeCache)
+            return binarySearch(start, end, sizeTester, availableSpace);
+        final String text = getText().toString();
+        final int key = text == null ? 0 : text.length();
+        int size = _textCachedSizes.get(key);
+        if (size != 0)
+            return size;
+        size = binarySearch(start, end, sizeTester, availableSpace);
+        _textCachedSizes.put(key, size);
+        return size;
+    }
+
+    private int binarySearch(final int start, final int end,
+                             final SizeTester sizeTester, final RectF availableSpace) {
         int lastBest = start;
         int lo = start;
         int hi = end - 1;
-
-        while(lo <= hi) {
-            int mid = lo + hi >>> 1;
-            int midValCmp = sizeTester.onTestSize(mid, availableSpace);
-            if(midValCmp < 0) {
+        int mid = 0;
+        while (lo <= hi) {
+            mid = lo + hi >>> 1;
+            final int midValCmp = sizeTester.onTestSize(mid, availableSpace);
+            if (midValCmp < 0) {
                 lastBest = lo;
                 lo = mid + 1;
-            } else {
-                if(midValCmp <= 0) {
-                    return mid;
-                }
-
+            } else if (midValCmp > 0) {
                 hi = mid - 1;
                 lastBest = hi;
-            }
+            } else
+                return mid;
         }
-
+        // make sure to return last best
+        // this is what should always be returned
         return lastBest;
     }
 
-    protected void onTextChanged(CharSequence text, int start, int before, int after) {
+    @Override
+    protected void onTextChanged(final CharSequence text, final int start,
+                                 final int before, final int after) {
         super.onTextChanged(text, start, before, after);
-        this.adjustTextSize();
+        reAdjust();
     }
 
-    protected void onSizeChanged(int width, int height, int oldwidth, int oldheight) {
+    @Override
+    protected void onSizeChanged(final int width, final int height,
+                                 final int oldwidth, final int oldheight) {
+        _textCachedSizes.clear();
         super.onSizeChanged(width, height, oldwidth, oldheight);
-        if(width != oldwidth || height != oldheight) {
-            this.adjustTextSize();
-        }
-
-    }
-
-    private interface SizeTester {
-        int onTestSize(int var1, RectF var2);
+        if (width != oldwidth || height != oldheight)
+            reAdjust();
     }
 }
